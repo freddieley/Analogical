@@ -1,0 +1,11 @@
+numpy>=1.24
+torch>=2.0
+
+# Optional: MuJoCo backend
+# mujoco>=3.0
+
+# Optional: experiment tracking
+# tensorboard>=2.13
+
+# Testing
+pytest>=7.0

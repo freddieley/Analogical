@@ -1,0 +1,8 @@
+numpy>=1.24
+torch>=2.0
+
+[dev]
+pytest>=7.0
+
+[mujoco]
+mujoco>=3.0
