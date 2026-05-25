@@ -1,13 +1,14 @@
 """Benchmark runner — orchestrates agent-environment interaction.
 
-Runs each TaskSpec for a configurable number of episodes, collects metrics,
-and reports results.
+Each scenario gets a fresh agent built from an ``agent_factory`` callable,
+ensuring agents are sized correctly for their environment and start from
+zero (no cross-scenario knowledge leakage).
 """
 
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from analogical.benchmark.metrics import EpisodeMetrics, SuiteMetrics
 from analogical.benchmark.tasks import TaskSpec
@@ -15,22 +16,32 @@ from analogical.sim.perturbation import PerturbationHarness
 
 
 class BenchmarkRunner:
-    """Runs an agent against a list of TaskSpecs and collects SuiteMetrics.
+    """Runs an agent (or fresh agents from a factory) against a list of
+    TaskSpecs and collects SuiteMetrics.
 
     Parameters
     ----------
-    agent           : AnalogicalAgent (or any object with .act() + .observe())
-    episodes_per_scenario : int — how many independent episodes per scenario
+    agent           : a pre-built agent (used for all scenarios).
+                      Ignored if ``agent_factory`` is provided.
+    agent_factory   : callable(TaskSpec) -> agent.  Called once per scenario
+                      so each scenario starts from a freshly-initialised agent
+                      with the correct environment dimensions.  Recommended
+                      when the suite mixes tasks with different state dims.
+    episodes_per_scenario : int
     verbose         : print per-episode results to stdout
     """
 
     def __init__(
         self,
-        agent,
+        agent=None,
+        agent_factory: Optional[Callable] = None,
         episodes_per_scenario: int = 3,
         verbose: bool = True,
     ) -> None:
+        if agent is None and agent_factory is None:
+            raise ValueError("Provide either 'agent' or 'agent_factory'.")
         self._agent = agent
+        self._factory = agent_factory
         self._eps = episodes_per_scenario
         self._verbose = verbose
 
@@ -41,8 +52,9 @@ class BenchmarkRunner:
         suite = SuiteMetrics()
 
         for spec in scenarios:
+            agent = self._factory(spec) if self._factory else self._agent
             for ep_idx in range(self._eps):
-                metrics = self._run_episode(spec, ep_idx)
+                metrics = self._run_episode(spec, agent, ep_idx)
                 suite.episodes.append(metrics)
                 if self._verbose:
                     self._print_episode(metrics, ep_idx)
@@ -54,11 +66,9 @@ class BenchmarkRunner:
 
     # ── Episode loop ──────────────────────────────────────────────────────
 
-    def _run_episode(self, spec: TaskSpec, ep_idx: int) -> EpisodeMetrics:
-        agent = self._agent
+    def _run_episode(self, spec: TaskSpec, agent, ep_idx: int) -> EpisodeMetrics:
         env = spec.env
 
-        # Reset both agent and env
         agent.reset_episode()
         obs = env.reset()
 
@@ -68,7 +78,7 @@ class BenchmarkRunner:
             perturbation_label=spec.perturbation_label,
         )
 
-        # Detect perturbation onset step from harness schedule
+        # Detect perturbation onset step
         onset_step: Optional[int] = None
         if isinstance(env, PerturbationHarness):
             events = sorted(env._schedule, key=lambda e: e.onset_step)
@@ -83,13 +93,9 @@ class BenchmarkRunner:
         for step in range(spec.max_steps):
             t_step_start = time.monotonic()
 
-            # Agent decides action
             action, elapsed_ms, agent_info = agent.act(obs)
-
-            # Step environment
             next_obs, reward, done, info = env.step(action)
 
-            # Agent observes outcome (online update)
             wm_loss = agent.observe(obs, action, next_obs, reward)
             if wm_loss is not None:
                 metrics.wm_losses.append(wm_loss)
@@ -102,14 +108,12 @@ class BenchmarkRunner:
             metrics.total_reward += reward
             metrics.total_steps += 1
 
-            # Track recovery: a "stable" step is one where the task-success
-            # condition holds after the perturbation onset
             if onset_step is not None and step >= onset_step:
                 if spec.success_fn(info):
                     if last_stable_step is None:
                         last_stable_step = step
                 else:
-                    last_stable_step = None  # reset streak
+                    last_stable_step = None
 
             obs = next_obs
 
@@ -117,7 +121,6 @@ class BenchmarkRunner:
                 metrics.task_success = spec.success_fn(info)
                 break
         else:
-            # Episode completed without early termination
             metrics.task_success = spec.success_fn({"reached": False, "failed": False})
 
         if onset_step is not None and last_stable_step is not None:
@@ -158,3 +161,4 @@ class BenchmarkRunner:
         for tid, sr in sorted(s["per_task_success_rate"].items()):
             print(f"  Task {tid} success   : {sr:.2%}")
         print("=" * 70)
+

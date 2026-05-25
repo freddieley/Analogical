@@ -107,26 +107,31 @@ def main() -> None:
             if hasattr(inner, "_render_vision"):
                 inner._render_vision = False
 
-    # ── Build agent ────────────────────────────────────────────────────────
-    # Use first scenario's env to get dims
-    first_env = scenarios[0].env
-    inner = first_env
-    while hasattr(inner, "_env"):
-        inner = inner._env
-
+    # ── Agent factory — one fresh agent per scenario ──────────────────────
     from analogical.agent import AnalogicalAgent
+    from analogical.sim.perturbation import PerturbationHarness
 
-    agent = AnalogicalAgent.from_env(inner, d_model=256, device=device)
+    def make_agent(spec):
+        inner = spec.env
+        while hasattr(inner, "_env"):
+            inner = inner._env
+        return AnalogicalAgent.from_env(inner, d_model=256, device=device)
 
-    print(f"Agent parameters : {sum(p.numel() for p in agent.core.parameters()):,} (core)")
-    print(f"Budget level     : {agent.governor.current_level.name}")
+    # Report agent size from the first scenario's env
+    first_inner = scenarios[0].env
+    while hasattr(first_inner, "_env"):
+        first_inner = first_inner._env
+    sample_agent = AnalogicalAgent.from_env(first_inner, d_model=256, device=device)
+    print(f"Agent parameters : {sum(p.numel() for p in sample_agent.core.parameters()):,} (core)")
+    print(f"Initial budget   : {sample_agent.governor.current_level.name}")
     print()
+    del sample_agent
 
     # ── Run benchmark ──────────────────────────────────────────────────────
     from analogical.benchmark.runner import BenchmarkRunner
 
     runner = BenchmarkRunner(
-        agent=agent,
+        agent_factory=make_agent,
         episodes_per_scenario=args.episodes,
         verbose=not args.quiet,
     )

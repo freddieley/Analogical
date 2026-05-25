@@ -151,19 +151,29 @@ class TestBenchmarkRunner:
 
     def test_single_scenario_run(self):
         env = MockCartpoleEnv(render_vision=False, seed=0)
-        agent = AnalogicalAgent.from_env(env, d_model=64)
-        specs = BalanceTask.scenarios(seed=0)[:2]   # first 2 only
+        specs = BalanceTask.scenarios(seed=0)[:2]
 
-        runner = BenchmarkRunner(agent=agent, episodes_per_scenario=1, verbose=False)
+        def factory(spec):
+            inner = spec.env
+            while hasattr(inner, "_env"):
+                inner = inner._env
+            return AnalogicalAgent.from_env(inner, d_model=64)
+
+        runner = BenchmarkRunner(agent_factory=factory, episodes_per_scenario=1, verbose=False)
         suite = runner.run(specs)
         assert len(suite.episodes) == 2
 
     def test_suite_metrics_computed(self):
         env = MockReachEnv(render_vision=False, seed=0)
-        agent = AnalogicalAgent.from_env(env, d_model=64)
         specs = ReachTask.scenarios(seed=0)[:2]
 
-        runner = BenchmarkRunner(agent=agent, episodes_per_scenario=1, verbose=False)
+        def factory(spec):
+            inner = spec.env
+            while hasattr(inner, "_env"):
+                inner = inner._env
+            return AnalogicalAgent.from_env(inner, d_model=64)
+
+        runner = BenchmarkRunner(agent_factory=factory, episodes_per_scenario=1, verbose=False)
         suite = runner.run(specs)
         assert 0.0 <= suite.success_rate <= 1.0
         assert 0.0 <= suite.timing_compliance_rate <= 1.0
@@ -171,14 +181,17 @@ class TestBenchmarkRunner:
 
     def test_timing_compliance_enforced(self):
         env = MockCartpoleEnv(render_vision=False, seed=0)
-        agent = AnalogicalAgent.from_env(env, d_model=64)
         specs = BalanceTask.scenarios(seed=0)[:1]
 
-        runner = BenchmarkRunner(agent=agent, episodes_per_scenario=1, verbose=False)
+        def factory(spec):
+            inner = spec.env
+            while hasattr(inner, "_env"):
+                inner = inner._env
+            return AnalogicalAgent.from_env(inner, d_model=64)
+
+        runner = BenchmarkRunner(agent_factory=factory, episodes_per_scenario=1, verbose=False)
         suite = runner.run(specs)
-        # In a fast (no-vision, small model) run, timing should be met
         for ep in suite.episodes:
-            # Allow up to 10% violations in a CI-constrained environment
             assert ep.timing_compliance_rate >= 0.9, (
                 f"Too many deadline violations: {ep.timing_compliance_rate:.2%}"
             )
