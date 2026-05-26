@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: analogical
+Version: 0.1.0
+Summary: Perception-first, zero-pretraining, real-time adaptive agent with online adaptation and MuJoCo/mock simulation support.
+Requires-Python: >=3.10
+Provides-Extra: dev
+Provides-Extra: mujoco
